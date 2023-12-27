@@ -1,0 +1,208 @@
+From 6c45d204124b897e168697cd5d41ebeb3e9b2caf Mon Sep 17 00:00:00 2001
+From: Mochalin Nikolay <mochalin.nikolay2017@yandex.ru>
+Date: Wed, 27 Dec 2023 15:43:49 +0300
+Subject: [PATCH 1/2] Added a warning window about clearing NVRAM when changing
+ Bios type and added a condition in the Remove_nvram_data function
+
+When changing the chipset from the Q35 chipset with UEFI SecureBoot to any other and with a Q35 chipset with UEFI, a Q35 chipset with BIOS, or an I440FX chipset with BIOS, the nvram is cleared. A window based on the ConfirmationModel has been added to notify the user about clearing NVRAM when changing the BIOS type
+---
+ .../uicommonweb/models/vms/VmListModel.java   | 25 +++++++++++++++++++
+ .../ovirt/engine/ui/uicompat/UIConstants.java |  4 +++
+ .../engine/ui/uicompat/UIConstants.properties |  2 ++
+ packaging/dbscripts/vms_sp.sql                |  2 +-
+ 4 files changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/frontend/webadmin/modules/uicommonweb/src/main/java/org/ovirt/engine/ui/uicommonweb/models/vms/VmListModel.java b/frontend/webadmin/modules/uicommonweb/src/main/java/org/ovirt/engine/ui/uicommonweb/models/vms/VmListModel.java
+index a020e9f9854..bbe6ee4ba36 100644
+--- a/frontend/webadmin/modules/uicommonweb/src/main/java/org/ovirt/engine/ui/uicommonweb/models/vms/VmListModel.java
++++ b/frontend/webadmin/modules/uicommonweb/src/main/java/org/ovirt/engine/ui/uicommonweb/models/vms/VmListModel.java
+@@ -30,6 +30,7 @@
+ import org.ovirt.engine.core.common.action.VmInterfacesModifyParameters;
+ import org.ovirt.engine.core.common.action.VmManagementParametersBase;
+ import org.ovirt.engine.core.common.action.VmOperationParameterBase;
++import org.ovirt.engine.core.common.businessentities.BiosType;
+ import org.ovirt.engine.core.common.businessentities.DisplayType;
+ import org.ovirt.engine.core.common.businessentities.MigrationSupport;
+ import org.ovirt.engine.core.common.businessentities.OriginType;
+@@ -787,6 +788,28 @@ private void edit() {
+ 
+     }
+ 
++    private void confirmChangedBiosType() {
++        if (getSelectedItem() == null || ((UnitVmModel) getWindow()).getIsNew()) {
++            preSave();
++        } else {
++            VM vm = getSelectedItem();
++            UnitVmModel model = (UnitVmModel) getWindow();
++            BiosType afterBiosType = model.getBiosType().getSelectedItem();
++            BiosType beforeBiosType = vm.getBiosType();
++            if ((beforeBiosType.equals(BiosType.Q35_SECURE_BOOT) && !afterBiosType.equals(BiosType.Q35_SECURE_BOOT)) ||
++                    (beforeBiosType.equals(BiosType.Q35_OVMF) && afterBiosType.getValue() < BiosType.Q35_OVMF.getValue())) {
++                ConfirmationModel confirmModel = new ConfirmationModel();
++                confirmModel.setTitle(ConstantsManager.getInstance().getConstants().vmChangedBiosTypeConfirmTitle());
++                confirmModel.setMessage(ConstantsManager.getInstance().getConstants().vmChangedBiosTypeConfirmMessage());
++                confirmModel.getCommands().add(UICommand.createDefaultOkUiCommand("PreSave", VmListModel.this)); //$NON-NLS-1$
++                confirmModel.getCommands().add(UICommand.createCancelUiCommand("Cancel", VmListModel.this)); //$NON-NLS-1$
++                setConfirmWindow(confirmModel);
++            } else {
++                preSave();
++            }
++        }
++    }
++
+     private void vmInitLoaded(VM vm) {
+         UnitVmModel model = new UnitVmModel(new ExistingVmModelBehavior(vm), this);
+         model.setVmAttachedToPool(vm.getVmPoolId() != null);
+@@ -2128,6 +2151,8 @@ public void executeCommand(UICommand command) {
+         } else if ("Cancel".equals(command.getName())) { //$NON-NLS-1$
+             cancel();
+         } else if ("OnSave".equals(command.getName())) { //$NON-NLS-1$
++            confirmChangedBiosType();
++        } else if ("PreSave".equals(command.getName())) {
+             preSave();
+         } else if ("OnRemove".equals(command.getName())) { //$NON-NLS-1$
+             onRemove();
+diff --git a/frontend/webadmin/modules/uicompat/src/main/java/org/ovirt/engine/ui/uicompat/UIConstants.java b/frontend/webadmin/modules/uicompat/src/main/java/org/ovirt/engine/ui/uicompat/UIConstants.java
+index 8956ca6a9cf..357afce54b1 100644
+--- a/frontend/webadmin/modules/uicompat/src/main/java/org/ovirt/engine/ui/uicompat/UIConstants.java
++++ b/frontend/webadmin/modules/uicompat/src/main/java/org/ovirt/engine/ui/uicompat/UIConstants.java
+@@ -2258,4 +2258,8 @@ public interface UIConstants extends Constants {
+     String homePageCustom();
+ 
+     String statelessVmFieldDisabledReason();
++
++    String vmChangedBiosTypeConfirmTitle();
++
++    String vmChangedBiosTypeConfirmMessage();
+ }
+diff --git a/frontend/webadmin/modules/uicompat/src/main/resources/org/ovirt/engine/ui/uicompat/UIConstants.properties b/frontend/webadmin/modules/uicompat/src/main/resources/org/ovirt/engine/ui/uicompat/UIConstants.properties
+index 02190af0c72..9dc765f1b81 100644
+--- a/frontend/webadmin/modules/uicompat/src/main/resources/org/ovirt/engine/ui/uicompat/UIConstants.properties
++++ b/frontend/webadmin/modules/uicompat/src/main/resources/org/ovirt/engine/ui/uicompat/UIConstants.properties
+@@ -418,6 +418,8 @@ editSecretTitle=Edit Authentication Key
+ editSharedMacPoolTitle=Edit MAC Address Pool
+ editStorageQoSTitle=Edit Storage QoS
+ editTagTitle=Edit Tag
++vmChangedBiosTypeConfirmTitle=Warning! Changed biostype! Clean NVRAM?
++vmChangedBiosTypeConfirmMessage = Are you sure you want to change BiosType? This change in bios type will clear NVRAM!
+ editTemplateTitle=Edit Template
+ editVirtualDiskTitle=Edit Virtual Disk
+ editVmTitle=Edit Virtual Machine
+diff --git a/packaging/dbscripts/vms_sp.sql b/packaging/dbscripts/vms_sp.sql
+index a09a4a89dda..d745ff89398 100644
+--- a/packaging/dbscripts/vms_sp.sql
++++ b/packaging/dbscripts/vms_sp.sql
+@@ -2503,7 +2503,7 @@ IF EXISTS remove_nvram_data_on_update
+ CREATE OR REPLACE FUNCTION remove_nvram_data ()
+ RETURNS TRIGGER AS $$
+ BEGIN
+-    IF OLD.bios_type = 4 AND NEW.bios_type != 4 THEN
++    IF (OLD.bios_type = 4 AND NEW.bios_type != 4) OR (OLD.bios_type = 3 AND NEW.bios_type < 3) THEN
+         DELETE FROM vm_nvram_data
+         WHERE vm_id = OLD.vm_guid;
+     END IF;
+
+From b18d05c526450822af1c1c43d06f4b5524fce1cf Mon Sep 17 00:00:00 2001
+From: Mochalin Nikolay <mochalin.nikolay2017@yandex.ru>
+Date: Wed, 27 Dec 2023 15:43:49 +0300
+Subject: [PATCH 2/2] Merge remote-tracking branch 'origin/master'
+
+# Conflicts:
+#	frontend/webadmin/modules/uicompat/src/main/resources/org/ovirt/engine/ui/uicompat/UIConstants.properties
+---
+ .../uicommonweb/models/vms/VmListModel.java   | 25 +++++++++++++++++++
+ .../ovirt/engine/ui/uicompat/UIConstants.java |  4 +++
+ .../engine/ui/uicompat/UIConstants.properties |  2 ++
+ packaging/dbscripts/vms_sp.sql                |  2 +-
+ 4 files changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/frontend/webadmin/modules/uicommonweb/src/main/java/org/ovirt/engine/ui/uicommonweb/models/vms/VmListModel.java b/frontend/webadmin/modules/uicommonweb/src/main/java/org/ovirt/engine/ui/uicommonweb/models/vms/VmListModel.java
+index a020e9f9854..bbe6ee4ba36 100644
+--- a/frontend/webadmin/modules/uicommonweb/src/main/java/org/ovirt/engine/ui/uicommonweb/models/vms/VmListModel.java
++++ b/frontend/webadmin/modules/uicommonweb/src/main/java/org/ovirt/engine/ui/uicommonweb/models/vms/VmListModel.java
+@@ -30,6 +30,7 @@
+ import org.ovirt.engine.core.common.action.VmInterfacesModifyParameters;
+ import org.ovirt.engine.core.common.action.VmManagementParametersBase;
+ import org.ovirt.engine.core.common.action.VmOperationParameterBase;
++import org.ovirt.engine.core.common.businessentities.BiosType;
+ import org.ovirt.engine.core.common.businessentities.DisplayType;
+ import org.ovirt.engine.core.common.businessentities.MigrationSupport;
+ import org.ovirt.engine.core.common.businessentities.OriginType;
+@@ -787,6 +788,28 @@ private void edit() {
+ 
+     }
+ 
++    private void confirmChangedBiosType() {
++        if (getSelectedItem() == null || ((UnitVmModel) getWindow()).getIsNew()) {
++            preSave();
++        } else {
++            VM vm = getSelectedItem();
++            UnitVmModel model = (UnitVmModel) getWindow();
++            BiosType afterBiosType = model.getBiosType().getSelectedItem();
++            BiosType beforeBiosType = vm.getBiosType();
++            if ((beforeBiosType.equals(BiosType.Q35_SECURE_BOOT) && !afterBiosType.equals(BiosType.Q35_SECURE_BOOT)) ||
++                    (beforeBiosType.equals(BiosType.Q35_OVMF) && afterBiosType.getValue() < BiosType.Q35_OVMF.getValue())) {
++                ConfirmationModel confirmModel = new ConfirmationModel();
++                confirmModel.setTitle(ConstantsManager.getInstance().getConstants().vmChangedBiosTypeConfirmTitle());
++                confirmModel.setMessage(ConstantsManager.getInstance().getConstants().vmChangedBiosTypeConfirmMessage());
++                confirmModel.getCommands().add(UICommand.createDefaultOkUiCommand("PreSave", VmListModel.this)); //$NON-NLS-1$
++                confirmModel.getCommands().add(UICommand.createCancelUiCommand("Cancel", VmListModel.this)); //$NON-NLS-1$
++                setConfirmWindow(confirmModel);
++            } else {
++                preSave();
++            }
++        }
++    }
++
+     private void vmInitLoaded(VM vm) {
+         UnitVmModel model = new UnitVmModel(new ExistingVmModelBehavior(vm), this);
+         model.setVmAttachedToPool(vm.getVmPoolId() != null);
+@@ -2128,6 +2151,8 @@ public void executeCommand(UICommand command) {
+         } else if ("Cancel".equals(command.getName())) { //$NON-NLS-1$
+             cancel();
+         } else if ("OnSave".equals(command.getName())) { //$NON-NLS-1$
++            confirmChangedBiosType();
++        } else if ("PreSave".equals(command.getName())) {
+             preSave();
+         } else if ("OnRemove".equals(command.getName())) { //$NON-NLS-1$
+             onRemove();
+diff --git a/frontend/webadmin/modules/uicompat/src/main/java/org/ovirt/engine/ui/uicompat/UIConstants.java b/frontend/webadmin/modules/uicompat/src/main/java/org/ovirt/engine/ui/uicompat/UIConstants.java
+index 8956ca6a9cf..357afce54b1 100644
+--- a/frontend/webadmin/modules/uicompat/src/main/java/org/ovirt/engine/ui/uicompat/UIConstants.java
++++ b/frontend/webadmin/modules/uicompat/src/main/java/org/ovirt/engine/ui/uicompat/UIConstants.java
+@@ -2258,4 +2258,8 @@ public interface UIConstants extends Constants {
+     String homePageCustom();
+ 
+     String statelessVmFieldDisabledReason();
++
++    String vmChangedBiosTypeConfirmTitle();
++
++    String vmChangedBiosTypeConfirmMessage();
+ }
+diff --git a/frontend/webadmin/modules/uicompat/src/main/resources/org/ovirt/engine/ui/uicompat/UIConstants.properties b/frontend/webadmin/modules/uicompat/src/main/resources/org/ovirt/engine/ui/uicompat/UIConstants.properties
+index 02190af0c72..5fbef582364 100644
+--- a/frontend/webadmin/modules/uicompat/src/main/resources/org/ovirt/engine/ui/uicompat/UIConstants.properties
++++ b/frontend/webadmin/modules/uicompat/src/main/resources/org/ovirt/engine/ui/uicompat/UIConstants.properties
+@@ -418,6 +418,8 @@ editSecretTitle=Edit Authentication Key
+ editSharedMacPoolTitle=Edit MAC Address Pool
+ editStorageQoSTitle=Edit Storage QoS
+ editTagTitle=Edit Tag
++vmChangedBiosTypeConfirmTitle=Warning! Biostype was changed!
++vmChangedBiosTypeConfirmMessage=Are you sure you want to change BiosType? If proceed NVRAM data will be cleared!
+ editTemplateTitle=Edit Template
+ editVirtualDiskTitle=Edit Virtual Disk
+ editVmTitle=Edit Virtual Machine
+diff --git a/packaging/dbscripts/vms_sp.sql b/packaging/dbscripts/vms_sp.sql
+index a09a4a89dda..d745ff89398 100644
+--- a/packaging/dbscripts/vms_sp.sql
++++ b/packaging/dbscripts/vms_sp.sql
+@@ -2503,7 +2503,7 @@ IF EXISTS remove_nvram_data_on_update
+ CREATE OR REPLACE FUNCTION remove_nvram_data ()
+ RETURNS TRIGGER AS $$
+ BEGIN
+-    IF OLD.bios_type = 4 AND NEW.bios_type != 4 THEN
++    IF (OLD.bios_type = 4 AND NEW.bios_type != 4) OR (OLD.bios_type = 3 AND NEW.bios_type < 3) THEN
+         DELETE FROM vm_nvram_data
+         WHERE vm_id = OLD.vm_guid;
+     END IF;
+
